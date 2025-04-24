@@ -103,27 +103,65 @@ class ChatRoomListCreateView(generics.ListCreateAPIView):
                 )
 
             # Find the participant based on ID
-            logger.info(f"Looking for participant with ID: {participant_id}")
+            logger.info(f"Looking for participant with ID: {participant_id}, type: {type(participant_id)}")
             participant = None
 
             try:
-                participant_id = int(participant_id)
+                # Convert to integer if it's a string
+                if isinstance(participant_id, str):
+                    logger.info(f"Converting participant_id from string '{participant_id}' to integer")
+                    try:
+                        participant_id = int(participant_id)
+                    except ValueError as e:
+                        logger.error(f"Failed to convert participant_id to integer: {str(e)}")
+                        return Response(
+                            {"error": f"Invalid participant_id format: {participant_id}. Must be a valid integer."},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+
+                logger.info(f"Converted participant_id: {participant_id}, type: {type(participant_id)}")
+
                 if participant_id >= 1000000:  # Producer ID range
-                    participant = Producer.objects.get(id=participant_id)
-                    logger.info(f"Found producer participant: {participant.username}")
+                    logger.info(f"Looking for producer with ID: {participant_id}")
+                    try:
+                        participant = Producer.objects.get(id=participant_id)
+                        logger.info(f"Found producer participant: {participant.username}")
+                    except Producer.DoesNotExist:
+                        logger.error(f"Producer with ID {participant_id} not found")
+                        return Response(
+                            {"error": f"Producer not found with ID: {participant_id}"},
+                            status=status.HTTP_404_NOT_FOUND
+                        )
                 else:
-                    participant = Artist.objects.get(id=participant_id)
-                    logger.info(f"Found artist participant: {participant.username}")
-            except (ValueError, Artist.DoesNotExist, Producer.DoesNotExist) as e:
+                    logger.info(f"Looking for artist with ID: {participant_id}")
+                    try:
+                        participant = Artist.objects.get(id=participant_id)
+                        logger.info(f"Found artist participant: {participant.username}")
+                    except Artist.DoesNotExist:
+                        logger.error(f"Artist with ID {participant_id} not found")
+                        return Response(
+                            {"error": f"Artist not found with ID: {participant_id}"},
+                            status=status.HTTP_404_NOT_FOUND
+                        )
+            except Exception as e:
                 logger.error(f"Error finding participant: {str(e)}")
+                logger.error(traceback.format_exc())
                 return Response(
-                    {"error": f"Participant not found with ID: {participant_id}"},
-                    status=status.HTTP_404_NOT_FOUND
+                    {"error": f"Failed to find participant: {str(e)}"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
                 )
 
             # Get or create a chat room
             current_user = request.user
             logger.info(f"Current user: {current_user.username} ({type(current_user)})")
+            logger.info(f"Current user ID: {current_user.id}, participant ID: {participant_id}")
+
+            if current_user.id == participant_id:
+                logger.error("User tried to create chat with themselves")
+                return Response(
+                    {"error": "Cannot create a chat room with yourself"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
             try:
                 room, created = ChatRoom.get_or_create_chatroom(current_user, participant)

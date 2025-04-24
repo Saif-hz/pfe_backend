@@ -43,7 +43,7 @@ def get_tokens_for_user(user):
         # Don't use RefreshToken.for_user directly as it tries to create OutstandingToken records
         # that expect a User model instance
         user_type = "artist" if isinstance(user, Artist) else "producer"
-        
+
         # Create a token payload manually
         token_payload = {
             "user_type": user_type,
@@ -56,7 +56,7 @@ def get_tokens_for_user(user):
             "iat": datetime.datetime.utcnow(),
             "jti": uuid.uuid4().hex
         }
-        
+
         # Create a refresh token with longer expiration
         refresh_payload = {
             "user_type": user_type,
@@ -69,20 +69,20 @@ def get_tokens_for_user(user):
             "iat": datetime.datetime.utcnow(),
             "jti": uuid.uuid4().hex
         }
-        
+
         # Encode tokens with your secret key
         access_token = jwt.encode(
             token_payload,
             settings.SIMPLE_JWT['SIGNING_KEY'],
             algorithm=settings.SIMPLE_JWT['ALGORITHM']
         )
-        
+
         refresh_token = jwt.encode(
             refresh_payload,
             settings.SIMPLE_JWT['SIGNING_KEY'],
             algorithm=settings.SIMPLE_JWT['ALGORITHM']
         )
-        
+
         logger.debug(f"Generated new tokens for user: {user.username}")
         return {
             "refresh": refresh_token,
@@ -133,14 +133,14 @@ class LoginView(APIView):
 
             # Generate JWT Token
             tokens = get_tokens_for_user(user)
-            
+
             # Log successful login
             logger.info(f"Successful login for user: {user.username} ({user_type})")
             logger.debug(f"Login response tokens: {tokens}")
 
             # Build absolute URLs for media files
             base_url = request.build_absolute_uri('/').rstrip('/')  # Get base URL like http://192.168.1.47:8000
-            
+
             # Prepare profile picture URL with full domain
             profile_picture_url = None
             if user.profile_picture:
@@ -150,12 +150,12 @@ class LoginView(APIView):
             response_data = {
                 "refresh": tokens["refresh"],
                 "access": tokens["access"],
-                "username": user.username,  
-                "email": user.email,  
+                "username": user.username,
+                "email": user.email,
                 "user_type": user_type,
                 "profile_picture": profile_picture_url,
             }
-            
+
             logger.info(f"LoginView: Sending login response with email: {response_data['email']}")
             return Response(response_data, status=status.HTTP_200_OK)
 
@@ -252,13 +252,13 @@ class GetProfileView(APIView):
         """
         try:
             logger.info(f"GetProfileView: Fetching profile for email: {email} or user_id: {user_id}, user_type_param: {user_type_param}")
-            
+
             user = None
-            
+
             if email:
                 # Clean email for case-insensitive comparison
                 email = email.strip().lower()
-                
+
                 # Search for user in both models regardless of authentication status
                 user = Artist.objects.filter(email__iexact=email).first()
                 if user:
@@ -272,19 +272,19 @@ class GetProfileView(APIView):
                     else:
                         logger.warning(f"GetProfileView: No user found with email: '{email}'")
                         return Response(
-                            {"code": "user_not_found", "detail": "User not found"}, 
+                            {"code": "user_not_found", "detail": "User not found"},
                             status=status.HTTP_404_NOT_FOUND
                         )
-            
+
             elif user_id:
                 # Use the ID range to determine the user type - simplifies the logic
                 from .models import get_user_by_id
                 user, user_type = get_user_by_id(user_id)
-                
+
                 # If the ID-based lookup failed but we have a user_type_param, try the specific lookup
                 if user is None and user_type_param:
                     logger.info(f"GetProfileView: ID-based lookup failed, trying with user_type_param: {user_type_param}")
-                    
+
                     if user_type_param == 'artist':
                         user = Artist.objects.filter(id=user_id).first()
                         if user:
@@ -293,7 +293,7 @@ class GetProfileView(APIView):
                         else:
                             logger.warning(f"GetProfileView: No artist found with ID: {user_id}")
                             return Response({"error": "Artist not found"}, status=status.HTTP_404_NOT_FOUND)
-                    
+
                     elif user_type_param == 'producer':
                         user = Producer.objects.filter(id=user_id).first()
                         if user:
@@ -302,26 +302,26 @@ class GetProfileView(APIView):
                         else:
                             logger.warning(f"GetProfileView: No producer found with ID: {user_id}")
                             return Response({"error": "Producer not found"}, status=status.HTTP_404_NOT_FOUND)
-                
+
                 # If we still don't have a user, return error
                 if user is None:
                     logger.warning(f"GetProfileView: No user found with ID: {user_id}")
                     return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-                
+
                 logger.info(f"GetProfileView: Found user type: {user_type} with ID: {user_id}")
-            
+
             else:
                 return Response({"error": "Email or user_id required"}, status=status.HTTP_400_BAD_REQUEST)
 
             # Build absolute URLs for media files
             request_obj = self.request  # Get the request object
             base_url = request_obj.build_absolute_uri('/').rstrip('/')  # Get base URL like http://192.168.1.47:8000
-            
+
             # Fetch user's posts - import inside method to avoid circular imports
             try:
                 from feed.models import Post
                 from feed.serializers import PostSerializer
-                
+
                 # Get posts for this user
                 logger.info(f"GetProfileView: Fetching posts for user {user.id} of type {user_type}")
                 posts = Post.objects.filter(user_id=user.id, user_type=user_type).order_by('-created_at')
@@ -330,7 +330,7 @@ class GetProfileView(APIView):
             except Exception as post_error:
                 logger.error(f"GetProfileView: Error fetching posts: {str(post_error)}")
                 posts_serialized = []
-            
+
             # Prepare response data
             response_data = {
                 "id": user.id,
@@ -348,15 +348,61 @@ class GetProfileView(APIView):
                 "following": 0,  # TODO: Implement following count
                 "posts": posts_serialized  # Include the serialized posts in the response
             }
-            
+
             # Add user type specific fields
             if user_type == 'artist':
                 response_data["talents"] = user.talents.split(',') if hasattr(user, 'talents') and user.talents else []
             elif user_type == 'producer':
                 response_data["studio_name"] = user.studio_name if hasattr(user, 'studio_name') else None
                 response_data["website"] = user.website if hasattr(user, 'website') else None
-            
+
             logger.info(f"GetProfileView: Sending response for user: {response_data['email']} with {len(posts_serialized)} posts")
+
+            # Check if collaborations are requested
+            if request.query_params.get('include_collaborations') == 'true':
+                # Find accepted collaboration requests for this user
+                collaborations = []
+
+                if isinstance(user, Artist):
+                    # Get collaborations as sender
+                    sender_collabs = CollaborationRequest.objects.filter(
+                        sender_artist=user,
+                        status='accepted'
+                    ).order_by('-updated_at')
+
+                    # Get collaborations as receiver
+                    receiver_collabs = CollaborationRequest.objects.filter(
+                        receiver_artist=user,
+                        status='accepted'
+                    ).order_by('-updated_at')
+                else:
+                    # Get collaborations as sender
+                    sender_collabs = CollaborationRequest.objects.filter(
+                        sender_producer=user,
+                        status='accepted'
+                    ).order_by('-updated_at')
+
+                    # Get collaborations as receiver
+                    receiver_collabs = CollaborationRequest.objects.filter(
+                        receiver_producer=user,
+                        status='accepted'
+                    ).order_by('-updated_at')
+
+                # Combine and serialize
+                all_collabs = list(sender_collabs) + list(receiver_collabs)
+                all_collabs.sort(key=lambda x: x.updated_at, reverse=True)
+
+                # Limit to most recent 5
+                recent_collabs = all_collabs[:5]
+
+                response_data['recent_collaborations'] = CollaborationRequestSerializer(
+                    recent_collabs,
+                    many=True,
+                    context={'request': request}
+                ).data
+
+                logger.info(f"Added {len(recent_collabs)} recent collaborations to profile response")
+
             return Response(response_data, status=status.HTTP_200_OK)
 
         except Exception as e:
@@ -377,7 +423,7 @@ class UpdateProfileView(APIView):
         try:
             # Clean up email
             email = email.strip().lower()
-            
+
             logger.info(f"UpdateProfileView: Received update request for email: '{email}'")
             logger.info(f"UpdateProfileView: Authenticated user's email is: '{request.user.email}'")
 
@@ -393,7 +439,7 @@ class UpdateProfileView(APIView):
             user = Artist.objects.filter(email__iexact=email).first()
             if not user:
                 user = Producer.objects.filter(email__iexact=email).first()
-            
+
             if not user:
                 logger.warning(f"UpdateProfileView: No user found with email: '{email}'")
                 return Response(
@@ -438,9 +484,20 @@ class UpdateProfileView(APIView):
                     )
 
             # Update basic fields
-            for field in ['nom', 'prenom', 'bio', 'location']:
+            for field in ['username', 'nom', 'prenom', 'bio', 'location']:
                 if field in request.data:
+                    # Check for username uniqueness if it's being updated
+                    if field == 'username' and request.data[field] != user.username:
+                        # Check if the new username already exists in either model
+                        username = request.data[field]
+                        if Artist.objects.filter(username=username).exclude(id=user.id).exists() or \
+                           Producer.objects.filter(username=username).exclude(id=user.id).exists():
+                            return Response(
+                                {"error": "Username already taken"},
+                                status=status.HTTP_400_BAD_REQUEST
+                            )
                     setattr(user, field, request.data[field])
+                    logger.info(f"UpdateProfileView: Updated {field} for {email}")
 
             # Update genres
             if 'genres' in request.data:
@@ -453,7 +510,7 @@ class UpdateProfileView(APIView):
                         except json.JSONDecodeError:
                             # If not valid JSON, treat as comma-separated string
                             genres = [g.strip() for g in genres.split(',') if g.strip()]
-                    
+
                     if isinstance(genres, list):
                         user.genres = ','.join(genres)
                     else:
@@ -480,7 +537,7 @@ class UpdateProfileView(APIView):
                         except json.JSONDecodeError:
                             # If not valid JSON, treat as comma-separated string
                             talents = [t.strip() for t in talents.split(',') if t.strip()]
-                    
+
                     if isinstance(talents, list):
                         user.talents = ','.join(talents)
                     else:
@@ -586,11 +643,11 @@ from rest_framework_simplejwt.views import TokenRefreshView as BaseTokenRefreshV
 
 class CustomTokenRefreshView(APIView):
     permission_classes = [AllowAny]
-    
+
     def post(self, request, *args, **kwargs):
         try:
             logger.info("TokenRefreshView: Attempting to refresh token")
-            
+
             # Check if refresh token is provided
             refresh_token = request.data.get('refresh')
             if not refresh_token:
@@ -599,10 +656,10 @@ class CustomTokenRefreshView(APIView):
                     {"error": "No refresh token provided", "code": "token_not_provided"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            
+
             # Log token info for debugging (don't log the full token in production)
             logger.info(f"TokenRefreshView: Refresh token provided (first 10 chars): {refresh_token[:10]}...")
-            
+
             # Decode the refresh token
             try:
                 # Decode token manually without token verification (we'll verify it in the next step)
@@ -611,7 +668,7 @@ class CustomTokenRefreshView(APIView):
                     settings.SIMPLE_JWT['SIGNING_KEY'],
                     algorithms=[settings.SIMPLE_JWT['ALGORITHM']]
                 )
-                
+
                 # Verify token type
                 if decoded_token.get('token_type') != 'refresh':
                     logger.error("TokenRefreshView: Invalid token type - not a refresh token")
@@ -619,7 +676,7 @@ class CustomTokenRefreshView(APIView):
                         {"error": "Invalid token type", "code": "invalid_token_type"},
                         status=status.HTTP_401_UNAUTHORIZED
                     )
-                
+
                 # Check if token is expired
                 exp = decoded_token.get('exp')
                 now = datetime.datetime.utcnow().timestamp()
@@ -629,34 +686,34 @@ class CustomTokenRefreshView(APIView):
                         {"error": "Refresh token expired", "code": "token_expired"},
                         status=status.HTTP_401_UNAUTHORIZED
                     )
-                
+
                 # Extract user info from token
                 user_id = decoded_token.get('user_id')
                 user_type = decoded_token.get('user_type')
                 username = decoded_token.get('username')
                 email = decoded_token.get('email')
-                
+
                 if not user_id or not user_type:
                     logger.error("TokenRefreshView: Missing required claims in token")
                     return Response(
                         {"error": "Invalid token - missing required claims", "code": "invalid_token"},
                         status=status.HTTP_401_UNAUTHORIZED
                     )
-                
+
                 # Get the user to verify they exist
                 user = None
                 if user_type == 'artist':
                     user = Artist.objects.filter(id=user_id).first()
                 else:
                     user = Producer.objects.filter(id=user_id).first()
-                
+
                 if not user:
                     logger.error(f"TokenRefreshView: User not found - ID: {user_id}, Type: {user_type}")
                     return Response(
                         {"error": "User not found", "code": "user_not_found"},
                         status=status.HTTP_401_UNAUTHORIZED
                     )
-                
+
                 # Generate a new access token
                 access_payload = {
                     "user_type": user_type,
@@ -668,13 +725,13 @@ class CustomTokenRefreshView(APIView):
                     "iat": datetime.datetime.utcnow(),
                     "jti": uuid.uuid4().hex
                 }
-                
+
                 access_token = jwt.encode(
                     access_payload,
                     settings.SIMPLE_JWT['SIGNING_KEY'],
                     algorithm=settings.SIMPLE_JWT['ALGORITHM']
                 )
-                
+
                 # Check if we need to rotate the refresh token
                 if settings.SIMPLE_JWT.get('ROTATE_REFRESH_TOKENS', False):
                     # Generate new refresh token
@@ -688,13 +745,13 @@ class CustomTokenRefreshView(APIView):
                         "iat": datetime.datetime.utcnow(),
                         "jti": uuid.uuid4().hex
                     }
-                    
+
                     new_refresh_token = jwt.encode(
                         refresh_payload,
                         settings.SIMPLE_JWT['SIGNING_KEY'],
                         algorithm=settings.SIMPLE_JWT['ALGORITHM']
                     )
-                    
+
                     response_data = {
                         "access": access_token,
                         "refresh": new_refresh_token,
@@ -711,10 +768,10 @@ class CustomTokenRefreshView(APIView):
                         "username": username,
                         "email": email
                     }
-                
+
                 logger.info("TokenRefreshView: Token refreshed successfully")
                 return Response(response_data, status=status.HTTP_200_OK)
-                
+
             except jwt.ExpiredSignatureError:
                 logger.error("TokenRefreshView: Refresh token expired")
                 return Response(
@@ -727,10 +784,10 @@ class CustomTokenRefreshView(APIView):
                     {"error": "Invalid refresh token", "code": "token_invalid"},
                     status=status.HTTP_401_UNAUTHORIZED
                 )
-            
+
         except Exception as e:
             logger.error(f"TokenRefreshView: Error refreshing token - {str(e)}")
-            
+
             return Response(
                 {"error": "Failed to refresh token", "code": "refresh_failed", "detail": str(e)},
                 status=status.HTTP_400_BAD_REQUEST
@@ -754,19 +811,19 @@ class ValidateTokenView(APIView):
             logger.info(f"ValidateTokenView: User authenticated as: {user.email}")
             logger.info(f"ValidateTokenView: User ID: {user.id}")
             logger.info(f"ValidateTokenView: User type: {type(user).__name__}")
-            
+
             # Get the actual email from the JWT token payload
             auth_header = request.headers.get('Authorization', '')
             if auth_header.startswith('Bearer '):
                 from rest_framework_simplejwt.tokens import AccessToken
                 import jwt
                 from django.conf import settings
-                
+
                 token = auth_header.split(' ')[1]
                 try:
                     # First try to decode with JWT library to see raw payload
                     payload = jwt.decode(
-                        token, 
+                        token,
                         settings.SIMPLE_JWT['SIGNING_KEY'],
                         algorithms=[settings.SIMPLE_JWT['ALGORITHM']]
                     )
@@ -774,18 +831,18 @@ class ValidateTokenView(APIView):
                     logger.info(f"ValidateTokenView: Token email value: {payload.get('email')}")
                 except Exception as e:
                     logger.error(f"ValidateTokenView: Error decoding raw token: {str(e)}")
-            
+
             # Compare user email to the one in request.user
             if hasattr(user, 'email'):
                 # Print exact character comparison to identify any invisible differences
                 email = user.email.strip().lower()
                 logger.info(f"ValidateTokenView: User email (raw): '{user.email}'")
                 logger.info(f"ValidateTokenView: User email (normalized): '{email}'")
-                
+
                 # Create hex representation to spot invisible characters
                 hex_email = ' '.join(hex(ord(c))[2:] for c in user.email)
                 logger.info(f"ValidateTokenView: User email (hex): {hex_email}")
-            
+
             # Return token validation success with user info
             return Response({
                 "valid": True,
@@ -796,7 +853,7 @@ class ValidateTokenView(APIView):
                     "user_type": "artist" if isinstance(user, Artist) else "producer"
                 }
             }, status=status.HTTP_200_OK)
-            
+
         except Exception as e:
             logger.error(f"ValidateTokenView Error: {str(e)}")
             return Response(
@@ -890,7 +947,7 @@ class ExploreFeedView(APIView):
                 "likes": 120,  # Dummy likes
                 "comments": 45,  # Dummy comments
             })
-        
+
         for producer in producers:
             feed.append({
                 "id": producer.id,
@@ -916,16 +973,16 @@ class DiscoverView(APIView):
 
             artists_queryset = Artist.objects.all()
             producers_queryset = Producer.objects.all()
-            
+
             # Exclude the current user if they are authenticated
             if request.user and request.user.is_authenticated:
                 logger.info(f"DiscoverView: Excluding authenticated user {request.user.username} (ID: {request.user.id})")
-                
+
                 if isinstance(request.user, Artist):
                     # Current user is an artist, exclude them from artists queryset
                     artists_queryset = artists_queryset.exclude(id=request.user.id)
                     logger.info(f"DiscoverView: Excluded artist with ID {request.user.id} from results")
-                    
+
                 elif isinstance(request.user, Producer):
                     # Current user is a producer, exclude them from producers queryset
                     producers_queryset = producers_queryset.exclude(id=request.user.id)
@@ -988,22 +1045,22 @@ class CollaborationRequestView(APIView):
             logger.info(f"User sending request: {request.user.username} (ID: {request.user.id})")
             logger.info(f"User type: {'Artist' if isinstance(request.user, Artist) else 'Producer'}")
             logger.info(f"Request data: {request.data}")
-            
+
             # Support both parameter formats for backward compatibility
             # Old format: receiver (ID only)
             # New format: receiver_id + receiver_type
-            
+
             # Try to get receiver_id and receiver_type from request
             receiver_id = request.data.get('receiver_id')
             # If receiver_id is not present, try the old format
             if not receiver_id:
                 receiver_id = request.data.get('receiver')
                 logger.info(f"Using legacy parameter 'receiver': {receiver_id}")
-                
+
             receiver_type = request.data.get('receiver_type', '').lower()  # 'artist' or 'producer'
-            
+
             logger.info(f"Processed parameters - Receiver ID: {receiver_id}, Receiver type: {receiver_type}")
-            
+
             if not receiver_id:
                 logger.warning("No receiver_id/receiver provided in request")
                 return Response(
@@ -1015,7 +1072,7 @@ class CollaborationRequestView(APIView):
             if not receiver_type:
                 receiver_type = 'producer'  # Legacy behavior assumed producer
                 logger.info(f"No receiver_type provided, defaulting to 'producer' for backward compatibility")
-                
+
             if receiver_type not in ['artist', 'producer']:
                 logger.warning(f"Invalid receiver_type: {receiver_type}")
                 return Response(
@@ -1025,12 +1082,12 @@ class CollaborationRequestView(APIView):
 
             # Determine the sender type (current user)
             sender_is_artist = isinstance(request.user, Artist)
-            
+
             # Find the receiver based on type
             receiver = None
             if receiver_type == 'artist':
                 receiver = Artist.objects.filter(id=receiver_id).first()
-                
+
                 # Check if user is trying to send a request to themselves
                 if sender_is_artist and request.user.id == int(receiver_id):
                     logger.warning(f"User attempted to send collaboration request to themselves: {request.user.username}")
@@ -1045,7 +1102,7 @@ class CollaborationRequestView(APIView):
                     logger.warning(f"Could not find artist with ID: {receiver_id}")
             else:  # producer
                 receiver = Producer.objects.filter(id=receiver_id).first()
-                
+
                 # Check if user is trying to send a request to themselves
                 if not sender_is_artist and request.user.id == int(receiver_id):
                     logger.warning(f"User attempted to send collaboration request to themselves: {request.user.username}")
@@ -1053,12 +1110,12 @@ class CollaborationRequestView(APIView):
                         {"error": "You cannot send a collaboration request to yourself"},
                         status=status.HTTP_400_BAD_REQUEST
                     )
-                    
+
                 if receiver:
                     logger.info(f"Found producer receiver: {receiver.username} (ID: {receiver.id})")
                 else:
                     logger.warning(f"Could not find producer with ID: {receiver_id}")
-                
+
             if not receiver:
                 # Try both types as a last resort if type was auto-assigned
                 if receiver_type == 'producer' and not request.data.get('receiver_type'):
@@ -1068,14 +1125,14 @@ class CollaborationRequestView(APIView):
                         logger.info(f"Found artist receiver as fallback: {fallback_receiver.username} (ID: {fallback_receiver.id})")
                         receiver = fallback_receiver
                         receiver_type = 'artist'
-                
+
             if not receiver:
                 logger.error(f"Collaboration Request Error: Receiver ID {receiver_id} not found as {receiver_type}")
                 return Response(
                     {"error": f"Receiver not found with ID {receiver_id}"},
                     status=status.HTTP_404_NOT_FOUND
                 )
-            
+
             # Validate message content
             message = request.data.get('message', '')
             if not message or len(message.strip()) == 0:
@@ -1084,14 +1141,14 @@ class CollaborationRequestView(APIView):
                     {"error": "Message is required"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            
+
             logger.info(f"Message: {message[:50]}{'...' if len(message) > 50 else ''}")
 
             # Create a new collaboration request
             collab_request = CollaborationRequest(
                 message=message
             )
-            
+
             # Set sender fields based on current user type
             if sender_is_artist:
                 logger.info(f"Setting sender as artist: {request.user.username}")
@@ -1101,7 +1158,7 @@ class CollaborationRequestView(APIView):
                 logger.info(f"Setting sender as producer: {request.user.username}")
                 collab_request.sender_producer = request.user
                 collab_request.sender_artist = None
-                
+
             # Set receiver fields based on type
             if receiver_type == 'artist':
                 logger.info(f"Setting receiver as artist: {receiver.username}")
@@ -1111,37 +1168,37 @@ class CollaborationRequestView(APIView):
                 logger.info(f"Setting receiver as producer: {receiver.username}")
                 collab_request.receiver_producer = receiver
                 collab_request.receiver_artist = None
-            
+
             # Save to database
             try:
                 collab_request.save()
                 logger.info(f"Successfully saved collaboration request with ID: {collab_request.id}")
-                
+
                 # Create a notification for the receiver
                 notification = Notification()
                 if receiver_type == 'artist':
                     notification.artist = receiver
                 else:
                     notification.producer = receiver
-                
+
                 notification.notification_type = 'collaboration_request'
                 notification.message = f"{request.user.username} sent you a collaboration request"
                 notification.related_id = collab_request.id
                 notification.save()
-                
+
                 logger.info(f"Created notification for {receiver.username} about new collaboration request")
-                
+
             except Exception as save_error:
                 logger.error(f"Error saving collaboration request: {str(save_error)}")
                 return Response(
                     {"error": f"Error saving request: {str(save_error)}"},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR
                 )
-                
+
             # Create response
             sender_type = 'artist' if sender_is_artist else 'producer'
             logger.info(f"Collaboration request created: {sender_type} {request.user.username} to {receiver_type} {receiver.username}")
-            
+
             # Use serializer to return response data
             serializer = CollaborationRequestSerializer(collab_request)
             logger.info(f"==== END CREATING COLLABORATION REQUEST ====")
@@ -1161,7 +1218,7 @@ class CollaborationRequestView(APIView):
             logger.info(f"User requesting collaboration requests: {request.user.username} (ID: {request.user.id})")
             user_is_artist = isinstance(request.user, Artist)
             logger.info(f"User type: {'Artist' if user_is_artist else 'Producer'}")
-            
+
             # Find requests that involve this user (both sent and received)
             # For improved performance, we'll build the query specifically for the user type
             if user_is_artist:
@@ -1174,32 +1231,32 @@ class CollaborationRequestView(APIView):
                 # This user is a producer, so look at sender_producer and receiver_producer
                 sent_requests = CollaborationRequest.objects.filter(sender_producer=request.user)
                 received_requests = CollaborationRequest.objects.filter(receiver_producer=request.user)
-                
+
             # Debug the queries
             logger.info(f"Sent requests query: {sent_requests.query}")
             logger.info(f"Sent requests count: {sent_requests.count()}")
             for req in sent_requests:
                 receiver = req.receiver_artist or req.receiver_producer
                 logger.info(f"  - Sent to: {receiver.username if receiver else 'Unknown'}, status: {req.status}")
-            
+
             logger.info(f"Received requests query: {received_requests.query}")
             logger.info(f"Received requests count: {received_requests.count()}")
             for req in received_requests:
                 sender = req.sender_artist or req.sender_producer
                 logger.info(f"  - Received from: {sender.username if sender else 'Unknown'}, status: {req.status}")
-            
+
             # Get all requests involving this user
             all_requests = sent_requests.union(received_requests).order_by('-created_at')
             logger.info(f"Total unique requests: {all_requests.count()}")
-            
+
             # Format the response
             sent_data = CollaborationRequestSerializer(sent_requests, many=True).data
             received_data = CollaborationRequestSerializer(received_requests, many=True).data
             all_data = CollaborationRequestSerializer(all_requests, many=True).data
-            
+
             logger.info(f"Response data counts - sent: {len(sent_data)}, received: {len(received_data)}, all: {len(all_data)}")
             logger.info(f"==== END COLLABORATION REQUESTS DEBUG ====")
-            
+
             # Return the response with sent, received, and all requests
             return Response({
                 "sent": sent_data,
@@ -1224,9 +1281,9 @@ class CollaborationRequestView(APIView):
                     {"error": "Collaboration request ID is required"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-                
+
             logger.info(f"Attempting to delete collaboration request with ID: {request_id}")
-            
+
             # Find the collaboration request
             try:
                 collab_request = CollaborationRequest.objects.get(id=request_id)
@@ -1236,24 +1293,24 @@ class CollaborationRequestView(APIView):
                     {"error": f"Collaboration request with ID {request_id} not found"},
                     status=status.HTTP_404_NOT_FOUND
                 )
-                
+
             # Security check: Make sure the user is either the sender or receiver
             current_user = request.user
             user_is_sender = False
             user_is_receiver = False
-            
+
             # Check if user is sender
             if isinstance(current_user, Artist) and collab_request.sender_artist == current_user:
                 user_is_sender = True
             elif isinstance(current_user, Producer) and collab_request.sender_producer == current_user:
                 user_is_sender = True
-                
+
             # Check if user is receiver
             if isinstance(current_user, Artist) and collab_request.receiver_artist == current_user:
                 user_is_receiver = True
             elif isinstance(current_user, Producer) and collab_request.receiver_producer == current_user:
                 user_is_receiver = True
-                
+
             if not (user_is_sender or user_is_receiver):
                 logger.warning(f"User {current_user.username} attempted to delete a request they're not involved in: {request_id}")
                 return Response(
@@ -1264,19 +1321,19 @@ class CollaborationRequestView(APIView):
             # Delete the collaboration request
             collab_request.delete()
             logger.info(f"Successfully deleted collaboration request {request_id}")
-            
+
             # Also delete any related notifications
             if user_is_sender or user_is_receiver:
                 notifications = Notification.objects.filter(related_id=request_id)
                 count = notifications.count()
                 notifications.delete()
                 logger.info(f"Deleted {count} notifications related to collaboration request {request_id}")
-            
+
             return Response(
                 {"success": True, "message": f"Collaboration request with ID {request_id} has been deleted"},
                 status=status.HTTP_200_OK
             )
-            
+
         except Exception as e:
             logger.error(f"Error deleting collaboration request: {str(e)}")
             return Response(
@@ -1312,7 +1369,7 @@ class CollaborationRequestActionView(APIView):
             # Verify the current user is the intended receiver
             current_user = request.user
             is_artist = isinstance(current_user, Artist)
-            
+
             # Check if the current user is the receiver of this request
             is_receiver = False
             if is_artist and collab_request.receiver_artist == current_user:
@@ -1335,6 +1392,23 @@ class CollaborationRequestActionView(APIView):
 
             logger.info(f"Collaboration request {request_id} {action}ed by {current_user.username}")
 
+            # If request is accepted, increment collaboration count for both users
+            if action == 'accept':
+                # Get sender and receiver
+                sender = collab_request.sender_artist or collab_request.sender_producer
+                receiver = collab_request.receiver_artist or collab_request.receiver_producer
+
+                if sender and receiver:
+                    # Increment collaboration counts
+                    sender.collaboration_count += 1
+                    receiver.collaboration_count += 1
+
+                    # Save changes
+                    sender.save(update_fields=['collaboration_count'])
+                    receiver.save(update_fields=['collaboration_count'])
+
+                    logger.info(f"Incremented collaboration counts for {sender.username} and {receiver.username}")
+
             # Create a notification for the sender
             sender = collab_request.sender_artist or collab_request.sender_producer
             if sender:
@@ -1344,13 +1418,13 @@ class CollaborationRequestActionView(APIView):
                     notification.artist = sender
                 else:
                     notification.producer = sender
-                
+
                 # Set notification details
                 notification.notification_type = 'collaboration_update'
                 notification.message = f"Your collaboration request to {current_user.username} has been {action}ed"
                 notification.related_id = collab_request.id
                 notification.save()
-                
+
                 logger.info(f"Created notification for {sender.username} about collaboration request {action}")
 
             # Return the updated collaboration request
@@ -1368,18 +1442,18 @@ class CollaborationRequestActionView(APIView):
 # Add this after CollaborationRequestActionView
 class TestCollaborationRequestsView(APIView):
     permission_classes = [AllowAny]  # Allow without authentication for testing
-    
+
     def get(self, request):
         """Test endpoint to debug collaboration requests"""
         try:
             # Check all collaboration requests in the system
             all_requests = CollaborationRequest.objects.all().order_by('-created_at')
-            
+
             results = {
                 "total_count": all_requests.count(),
                 "requests": []
             }
-            
+
             for req in all_requests:
                 sender = None
                 sender_type = None
@@ -1389,7 +1463,7 @@ class TestCollaborationRequestsView(APIView):
                 elif req.sender_producer:
                     sender = req.sender_producer
                     sender_type = "producer"
-                
+
                 receiver = None
                 receiver_type = None
                 if req.receiver_artist:
@@ -1398,7 +1472,7 @@ class TestCollaborationRequestsView(APIView):
                 elif req.receiver_producer:
                     receiver = req.receiver_producer
                     receiver_type = "producer"
-                
+
                 results["requests"].append({
                     "id": req.id,
                     "created_at": req.created_at,
@@ -1415,15 +1489,15 @@ class TestCollaborationRequestsView(APIView):
                         "type": receiver_type
                     }
                 })
-            
+
             return Response(results, status=status.HTTP_200_OK)
-            
+
         except Exception as e:
             logger.error(f"Test Collaboration Requests Error: {str(e)}")
             return Response({
                 "error": str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
+
     def post(self, request):
         """Test endpoint to create a collaboration request directly"""
         try:
@@ -1432,56 +1506,56 @@ class TestCollaborationRequestsView(APIView):
             receiver_type = request.data.get('receiver_type')
             receiver_id = request.data.get('receiver_id')
             message = request.data.get('message', 'Test collaboration request')
-            
+
             if not sender_type or not sender_id or not receiver_type or not receiver_id:
                 return Response({
                     "error": "Missing required fields",
                     "required": ["sender_type", "sender_id", "receiver_type", "receiver_id"]
                 }, status=status.HTTP_400_BAD_REQUEST)
-            
+
             # Find sender
             sender = None
             if sender_type == 'artist':
                 sender = Artist.objects.filter(id=sender_id).first()
             else:
                 sender = Producer.objects.filter(id=sender_id).first()
-                
+
             if not sender:
                 return Response({"error": f"Sender not found with ID {sender_id}"}, status=status.HTTP_404_NOT_FOUND)
-            
+
             # Find receiver
             receiver = None
             if receiver_type == 'artist':
                 receiver = Artist.objects.filter(id=receiver_id).first()
             else:
                 receiver = Producer.objects.filter(id=receiver_id).first()
-                
+
             if not receiver:
                 return Response({"error": f"Receiver not found with ID {receiver_id}"}, status=status.HTTP_404_NOT_FOUND)
-            
+
             # Create request
             collab_request = CollaborationRequest(message=message)
-            
+
             # Set sender
             if sender_type == 'artist':
                 collab_request.sender_artist = sender
             else:
                 collab_request.sender_producer = sender
-                
+
             # Set receiver
             if receiver_type == 'artist':
                 collab_request.receiver_artist = receiver
             else:
                 collab_request.receiver_producer = receiver
-                
+
             collab_request.save()
-            
+
             return Response({
                 "success": True,
                 "message": f"Created collaboration request from {sender.username} to {receiver.username}",
                 "request_id": collab_request.id
             }, status=status.HTTP_201_CREATED)
-            
+
         except Exception as e:
             logger.error(f"Test Create Collaboration Request Error: {str(e)}")
             return Response({
@@ -1507,11 +1581,11 @@ class NotificationView(APIView):
             logger.info(f"NotificationView: Request received with auth: {request.auth}")
             logger.info(f"NotificationView: User: {request.user}")
             logger.info(f"NotificationView: User ID: {getattr(request.user, 'id', 'No ID')}")
-            
+
             # Get the user type and id from the token
             user_id = request.user.id
             user_type = None
-            
+
             # Determine user type
             if Producer.objects.filter(id=user_id).exists():
                 user_type = "producer"
@@ -1522,52 +1596,52 @@ class NotificationView(APIView):
             else:
                 logger.error(f"NotificationView: Could not determine user type for ID {user_id}")
                 return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-            
+
             # Query notifications based on user type
             if user_type == "producer":
                 notifications = Notification.objects.filter(producer_id=user_id)
             else:  # artist
                 notifications = Notification.objects.filter(artist_id=user_id)
-            
+
             logger.info(f"NotificationView: Found {notifications.count()} notifications for {user_type} with ID {user_id}")
-            
+
             # Log all notifications for debugging
             for notification in notifications:
                 logger.info(f"NotificationView: Notification {notification.id}: {notification.notification_type} - {notification.message}")
-            
+
             # Get notification type filter if provided
             notification_type = request.query_params.get('type')
             if notification_type:
                 notifications = notifications.filter(notification_type=notification_type)
                 logger.info(f"NotificationView: Filtered by type {notification_type}, now have {notifications.count()} notifications")
-            
+
             # Get unread filter if provided
             unread_only = request.query_params.get('unread')
             if unread_only and unread_only.lower() == 'true':
                 notifications = notifications.filter(read=False)
                 logger.info(f"NotificationView: Filtered by unread, now have {notifications.count()} notifications")
-            
+
             # Apply pagination
             paginator = self.pagination_class()
             paginated_notifications = paginator.paginate_queryset(notifications, request)
-            
+
             # Serialize notifications
             serializer = NotificationSerializer(paginated_notifications, many=True, context={'request': request})
-            
+
             # Return paginated response
             return paginator.get_paginated_response(serializer.data)
-            
+
         except Exception as e:
             logger.error(f"NotificationView Error: {str(e)}")
             logger.error(traceback.format_exc())  # Log the full stack trace
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            
+
     def put(self, request):
         """Mark all notifications as read"""
         try:
             user_id = request.user.id
             user_type = None
-            
+
             # Determine user type
             if Producer.objects.filter(id=user_id).exists():
                 user_type = "producer"
@@ -1575,15 +1649,15 @@ class NotificationView(APIView):
                 user_type = "artist"
             else:
                 return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-            
+
             # Update all notifications to read based on user type
             if user_type == "producer":
                 Notification.objects.filter(producer_id=user_id).update(read=True)
             else:  # artist
                 Notification.objects.filter(artist_id=user_id).update(read=True)
-            
+
             return Response({"message": "All notifications marked as read"}, status=status.HTTP_200_OK)
-            
+
         except Exception as e:
             logger.error(f"Error marking notifications as read: {str(e)}")
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1593,14 +1667,14 @@ class NotificationView(APIView):
 class MarkNotificationReadView(APIView):
     permission_classes = [IsAuthenticated]
     authentication_classes = [JWTAuthentication, CustomJWTAuthentication]
-    
+
     def post(self, request, notification_id):
         try:
             # Log authentication info for debugging
             logger.info(f"MarkNotificationReadView: User ID: {getattr(request.user, 'id', 'No ID')}")
-            
+
             user_id = request.user.id
-            
+
             # Find the notification and ensure it belongs to this user
             notification = None
             try:
@@ -1608,7 +1682,7 @@ class MarkNotificationReadView(APIView):
                 if Producer.objects.filter(id=user_id).exists():
                     notification = Notification.objects.get(id=notification_id, producer_id=user_id)
                     logger.info(f"MarkNotificationReadView: Found notification for producer {user_id}")
-                # Check if user is an artist 
+                # Check if user is an artist
                 elif Artist.objects.filter(id=user_id).exists():
                     notification = Notification.objects.get(id=notification_id, artist_id=user_id)
                     logger.info(f"MarkNotificationReadView: Found notification for artist {user_id}")
@@ -1618,17 +1692,17 @@ class MarkNotificationReadView(APIView):
                     {"error": "Notification not found or you don't have permission to access it"},
                     status=status.HTTP_404_NOT_FOUND
                 )
-                
+
             # Mark as read
             notification.read = True
             notification.save()
             logger.info(f"MarkNotificationReadView: Marked notification {notification_id} as read")
-            
+
             return Response(
                 {"success": True, "message": "Notification marked as read"},
                 status=status.HTTP_200_OK
             )
-            
+
         except Exception as e:
             logger.error(f"MarkNotificationReadView Error: {str(e)}")
             logger.error(traceback.format_exc())
@@ -1642,14 +1716,14 @@ class MarkNotificationReadView(APIView):
 class DeleteNotificationView(APIView):
     permission_classes = [IsAuthenticated]
     authentication_classes = [JWTAuthentication, CustomJWTAuthentication]
-    
+
     def delete(self, request, notification_id):
         try:
             # Log authentication info for debugging
             logger.info(f"DeleteNotificationView: User ID: {getattr(request.user, 'id', 'No ID')}")
-            
+
             user_id = request.user.id
-            
+
             # Find the notification and ensure it belongs to this user
             notification = None
             try:
@@ -1657,7 +1731,7 @@ class DeleteNotificationView(APIView):
                 if Producer.objects.filter(id=user_id).exists():
                     notification = Notification.objects.get(id=notification_id, producer_id=user_id)
                     logger.info(f"DeleteNotificationView: Found notification for producer {user_id}")
-                # Check if user is an artist 
+                # Check if user is an artist
                 elif Artist.objects.filter(id=user_id).exists():
                     notification = Notification.objects.get(id=notification_id, artist_id=user_id)
                     logger.info(f"DeleteNotificationView: Found notification for artist {user_id}")
@@ -1667,16 +1741,16 @@ class DeleteNotificationView(APIView):
                     {"error": "Notification not found or you don't have permission to delete it"},
                     status=status.HTTP_404_NOT_FOUND
                 )
-                
+
             # Delete the notification
             notification.delete()
             logger.info(f"DeleteNotificationView: Deleted notification {notification_id}")
-            
+
             return Response(
                 {"success": True, "message": "Notification deleted successfully"},
                 status=status.HTTP_200_OK
             )
-            
+
         except Exception as e:
             logger.error(f"DeleteNotificationView Error: {str(e)}")
             logger.error(traceback.format_exc())
@@ -1696,11 +1770,11 @@ class GoogleLoginView(APIView):
             id_token = request.data.get('id_token')
             if not id_token:
                 return Response({'error': 'No token provided'}, status=status.HTTP_400_BAD_REQUEST)
-            
+
             # Verify the token with Google
             from google.oauth2 import id_token as google_id_token
             from google.auth.transport import requests as google_requests
-            
+
             # Get the Google client ID from the database
             try:
                 google_app = SocialApp.objects.get(provider='google')
@@ -1710,25 +1784,25 @@ class GoogleLoginView(APIView):
                     {'error': 'Google OAuth not configured properly'},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR
                 )
-            
+
             try:
                 # Verify the token
                 idinfo = google_id_token.verify_oauth2_token(
                     id_token, google_requests.Request(), client_id
                 )
-                
+
                 # Get user info from the token
                 email = idinfo['email']
                 if not email:
                     return Response({'error': 'Email not provided by Google'}, status=status.HTTP_400_BAD_REQUEST)
-                
+
                 # Check if user exists
                 artist_user = Artist.objects.filter(email=email).first()
                 producer_user = Producer.objects.filter(email=email).first()
-                
+
                 # For simplicity, we'll prioritize Artist accounts over Producer accounts
                 user = artist_user or producer_user
-                
+
                 if not user:
                     # User doesn't exist, create a new one
                     # For this example we'll create an Artist account
@@ -1737,18 +1811,18 @@ class GoogleLoginView(APIView):
                     last_name = idinfo.get('family_name', '')
                     picture = idinfo.get('picture', '')
                     username = email.split('@')[0]  # Create username from email
-                    
+
                     # Ensure username is unique
                     base_username = username
                     i = 1
                     while Artist.objects.filter(username=username).exists() or Producer.objects.filter(username=username).exists():
                         username = f"{base_username}{i}"
                         i += 1
-                    
+
                     # Create new user
                     import secrets
                     random_password = secrets.token_urlsafe(16)  # Generate a random password
-                    
+
                     user = Artist.objects.create(
                         username=username,
                         email=email,
@@ -1756,7 +1830,7 @@ class GoogleLoginView(APIView):
                         prenom=first_name,
                         password=random_password  # This will be hashed in the save method
                     )
-                    
+
                     # If there's a profile picture, download and save it
                     if picture:
                         from django.core.files.base import ContentFile
@@ -1768,11 +1842,11 @@ class GoogleLoginView(APIView):
                                 ContentFile(response.content),
                                 save=True
                             )
-                
+
                 # Generate tokens for user
                 from rest_framework_simplejwt.tokens import RefreshToken
                 refresh = RefreshToken.for_user(user)
-                
+
                 return Response({
                     'user': {
                         'id': user.id,
@@ -1786,10 +1860,10 @@ class GoogleLoginView(APIView):
                         'access': str(refresh.access_token),
                     }
                 }, status=status.HTTP_200_OK)
-                
+
             except ValueError:
                 # Invalid token
                 return Response({'error': 'Invalid token'}, status=status.HTTP_400_BAD_REQUEST)
-            
+
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

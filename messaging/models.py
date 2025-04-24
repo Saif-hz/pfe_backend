@@ -53,16 +53,37 @@ class ChatRoom(models.Model):
         Add a participant (Artist or Producer) to this chat room
         """
         if isinstance(user, (Artist, Producer)):
-            content_type = ContentType.objects.get_for_model(user)
-            ChatRoomParticipant.objects.get_or_create(
-                chat_room=self,
-                content_type=content_type,
-                object_id=user.id
-            )
-            logger.info(f"Added participant {user} to chat room {self.name}")
+            try:
+                content_type = ContentType.objects.get_for_model(user)
+                logger.info(f"Adding participant to chat room {self.id}: user={user.id}, type={content_type}")
+
+                # Check if participant already exists
+                exists = ChatRoomParticipant.objects.filter(
+                    chat_room=self,
+                    content_type=content_type,
+                    object_id=user.id
+                ).exists()
+
+                if exists:
+                    logger.info(f"Participant {user.id} already exists in chat room {self.id}")
+                    return
+
+                participant = ChatRoomParticipant.objects.create(
+                    chat_room=self,
+                    content_type=content_type,
+                    object_id=user.id
+                )
+                logger.info(f"Added participant {user.username} (id={user.id}) to chat room {self.id}")
+                return participant
+            except Exception as e:
+                logger.error(f"Error adding participant {user} to chat room {self.id}: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+                raise RuntimeError(f"Failed to add participant: {str(e)}")
         else:
-            logger.error(f"Cannot add participant of type {type(user)} to chat room")
-            raise TypeError(f"Expected Artist or Producer, got {type(user)}")
+            logger.error(f"Cannot add participant of type {type(user).__name__} to chat room {self.id}")
+            logger.error(f"User details: {user}")
+            raise TypeError(f"Expected Artist or Producer, got {type(user).__name__}")
 
     def has_participant(self, user):
         """
@@ -87,7 +108,14 @@ class ChatRoom(models.Model):
         if not (isinstance(user1, (Artist, Producer)) and isinstance(user2, (Artist, Producer))):
             logger.error(f"Both users must be Artist or Producer instances")
             logger.error(f"User1: {type(user1)}, User2: {type(user2)}")
-            raise TypeError("Both users must be Artist or Producer instances")
+            logger.error(f"User1 ID: {getattr(user1, 'id', 'No ID')}, User2 ID: {getattr(user2, 'id', 'No ID')}")
+
+            # Check user models specifically
+            user1_model = user1.__class__.__name__ if user1 else 'None'
+            user2_model = user2.__class__.__name__ if user2 else 'None'
+            logger.error(f"User1 model: {user1_model}, User2 model: {user2_model}")
+
+            raise TypeError(f"Both users must be Artist or Producer instances, got {user1_model} and {user2_model}")
 
         # First check if a chat room already exists with both users
         try:
@@ -95,11 +123,15 @@ class ChatRoom(models.Model):
             user1_content_type = ContentType.objects.get_for_model(user1)
             user2_content_type = ContentType.objects.get_for_model(user2)
 
+            logger.info(f"Finding chat rooms for user1={user1.id} (type={user1_content_type}) and user2={user2.id} (type={user2_content_type})")
+
             # Find chat rooms that have user1 as a participant
             user1_rooms = set(ChatRoomParticipant.objects.filter(
                 content_type=user1_content_type,
                 object_id=user1.id
             ).values_list('chat_room_id', flat=True))
+
+            logger.info(f"Found {len(user1_rooms)} rooms for user1: {user1_rooms}")
 
             # Find chat rooms that have user2 as a participant
             user2_rooms = set(ChatRoomParticipant.objects.filter(
@@ -107,8 +139,11 @@ class ChatRoom(models.Model):
                 object_id=user2.id
             ).values_list('chat_room_id', flat=True))
 
+            logger.info(f"Found {len(user2_rooms)} rooms for user2: {user2_rooms}")
+
             # Get the intersection of rooms
             common_rooms = user1_rooms.intersection(user2_rooms)
+            logger.info(f"Found {len(common_rooms)} common rooms: {common_rooms}")
 
             if common_rooms:
                 # Return the first common room
@@ -118,23 +153,44 @@ class ChatRoom(models.Model):
                 return room, False
         except Exception as e:
             logger.error(f"Error finding existing chat room: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
 
         # No common room found, create a new one
         try:
             # Generate a unique name based on user IDs
             room_name = f"chat_{min(user1.id, user2.id)}_{max(user1.id, user2.id)}"
+            logger.info(f"Creating new room with name: {room_name}")
 
             # Create the room
             room = ChatRoom.objects.create(name=room_name)
+            logger.info(f"Room created with id: {room.id}")
 
             # Add both users as participants
-            room.add_participant(user1)
-            room.add_participant(user2)
+            try:
+                room.add_participant(user1)
+                logger.info(f"Added user1 (id={user1.id}) as participant")
+            except Exception as e:
+                logger.error(f"Error adding user1 as participant: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+                raise
+
+            try:
+                room.add_participant(user2)
+                logger.info(f"Added user2 (id={user2.id}) as participant")
+            except Exception as e:
+                logger.error(f"Error adding user2 as participant: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+                raise
 
             logger.info(f"Created new chat room: {room.id} for users {user1.id} and {user2.id}")
             return room, True
         except Exception as e:
             logger.error(f"Error creating chat room: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             raise
 
 

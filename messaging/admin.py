@@ -1,12 +1,17 @@
 from django.contrib import admin
 from .models import Message, ChatRoom, ChatRoomParticipant, MessageReadStatus
+from common.admin_mixins import ViewOnlyModelAdmin
 
 class MessageReadStatusInline(admin.TabularInline):
     model = MessageReadStatus
     extra = 0
     readonly_fields = ('is_read', 'read_at')
+    can_delete = False
 
-class MessageAdmin(admin.ModelAdmin):
+    def has_add_permission(self, request, obj=None):
+        return False
+
+class MessageAdmin(ViewOnlyModelAdmin):
     list_display = ('id', 'sender_display', 'content', 'room', 'timestamp', 'has_attachment', 'is_read')
     list_filter = ('timestamp', 'is_read', 'file_type')
     search_fields = ('content',)
@@ -27,8 +32,12 @@ class MessageAdmin(admin.ModelAdmin):
 class ChatRoomParticipantInline(admin.TabularInline):
     model = ChatRoomParticipant
     extra = 0
+    can_delete = False
 
-class ChatRoomAdmin(admin.ModelAdmin):
+    def has_add_permission(self, request, obj=None):
+        return False
+
+class ChatRoomAdmin(ViewOnlyModelAdmin):
     list_display = ('id', 'name', 'participant_count', 'created_at')
     search_fields = ('name',)
     inlines = [ChatRoomParticipantInline]
@@ -37,7 +46,7 @@ class ChatRoomAdmin(admin.ModelAdmin):
         return obj.participant_links.count()
     participant_count.short_description = 'Participants'
 
-class ChatRoomParticipantAdmin(admin.ModelAdmin):
+class ChatRoomParticipantAdmin(ViewOnlyModelAdmin):
     list_display = ('id', 'chat_room', 'participant_display')
 
     def participant_display(self, obj):
@@ -46,7 +55,7 @@ class ChatRoomParticipantAdmin(admin.ModelAdmin):
         return "Unknown"
     participant_display.short_description = 'Participant'
 
-class MessageReadStatusAdmin(admin.ModelAdmin):
+class MessageReadStatusAdmin(ViewOnlyModelAdmin):
     list_display = ('id', 'message', 'reader_display', 'is_read', 'read_at')
     list_filter = ('is_read', 'read_at')
 

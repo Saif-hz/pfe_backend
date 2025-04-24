@@ -1,7 +1,8 @@
 from django.contrib import admin
 from django import forms
 from django.contrib.auth.hashers import make_password
-from .models import Artist, Producer
+from .models import Artist, Producer, CollaborationRequest, Notification
+from common.admin_mixins import ViewOnlyModelAdmin
 
 # 🔥 Custom Form for Artist to Show Password Field
 class ArtistAdminForm(forms.ModelForm):
@@ -16,15 +17,18 @@ class ArtistAdminForm(forms.ModelForm):
         return make_password(password)  # 🔐 Hash password before saving
 
 
-class ArtistAdmin(admin.ModelAdmin):
+class ArtistAdmin(ViewOnlyModelAdmin):
     form = ArtistAdminForm
     list_display = ('email', 'nom', 'prenom', 'talents', 'genres')
-    fields = ('email', 'nom', 'prenom', 'password', 'profile_picture', 'bio', 'talents', 'genres')  # 🔥 Added password field
+    fields = ('email', 'nom', 'prenom', 'password', 'profile_picture', 'bio', 'talents', 'genres')
 
-admin.site.register(Artist, ArtistAdmin)
+    def get_readonly_fields(self, request, obj=None):
+        if obj:  # editing an existing object
+            return self.fields
+        return []
 
 
-#  Custom Form for Producer to Show Password Field
+# Custom Form for Producer to Show Password Field
 class ProducerAdminForm(forms.ModelForm):
     password = forms.CharField(widget=forms.PasswordInput, required=True)  # 🔥 Show password field
 
@@ -37,23 +41,25 @@ class ProducerAdminForm(forms.ModelForm):
         return make_password(password)  # 🔐 Hash password before saving
 
 
-class ProducerAdmin(admin.ModelAdmin):
+class ProducerAdmin(ViewOnlyModelAdmin):
     form = ProducerAdminForm
     list_display = ('email', 'nom', 'prenom', 'studio_name', 'website', 'genres')
-    fields = ('email', 'nom', 'prenom', 'password', 'profile_picture', 'bio', 'studio_name', 'website', 'genres')  # 🔥 Added password field
+    fields = ('email', 'nom', 'prenom', 'password', 'profile_picture', 'bio', 'studio_name', 'website', 'genres')
 
+    def get_readonly_fields(self, request, obj=None):
+        if obj:  # editing an existing object
+            return self.fields
+        return []
+
+admin.site.register(Artist, ArtistAdmin)
 admin.site.register(Producer, ProducerAdmin)
 
-
-from rest_framework_simplejwt.tokens import AccessToken
-
-token_string = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzQxNDAzMDIzLCJpYXQiOjE3NDE0MDIxMjMsImp0aSI6ImY1M2FiMDJlZWI5NDRmNTU5ZmY1ZmE3YWFmMDE3OTMyIiwidXNlcl9pZCI6MjQsInVzZXJfdHlwZSI6ImFydGlzdCJ9.Mh7qOIoGXhqpNg3nVmymj6oz4zlwKVoo38Etviuvx4w"
+# Register other models with read-only permissions if they exist in the app
 try:
-    token = AccessToken(token_string)
-    print("User ID:", token["user_id"])
-    print("User Type:", token["user_type"])
-except Exception as e:
-    print("Invalid Token:", str(e))
+    admin.site.register(CollaborationRequest, ViewOnlyModelAdmin)
+    admin.site.register(Notification, ViewOnlyModelAdmin)
+except admin.sites.AlreadyRegistered:
+    pass  # Models already registered
 
 
- 
+

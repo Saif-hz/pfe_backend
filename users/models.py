@@ -102,14 +102,15 @@ class Artist(models.Model):
     following = models.ManyToManyField("self", symmetrical=False, related_name="user_following", blank=True)  # Following system
     created_at = models.DateTimeField(auto_now_add=True)
     reset_code = models.CharField(max_length=6, blank=True, null=True)
-    
+    collaboration_count = models.PositiveIntegerField(default=0)  # Track number of successful collaborations
+
     # Use custom manager
     objects = ArtistManager()
 
     def save(self, *args, **kwargs):
         if self.password and not self.password.startswith("pbkdf2_sha256$"):
             self.password = make_password(self.password)
-        
+
         # Delete old profile picture if it exists
         if self.pk:
             old_instance = Artist.objects.get(pk=self.pk)
@@ -117,7 +118,7 @@ class Artist(models.Model):
                 old_instance.profile_picture.delete(save=False)
             if hasattr(old_instance, 'cover_photo') and old_instance.cover_photo and self.cover_photo != old_instance.cover_photo:
                 old_instance.cover_photo.delete(save=False)
-                
+
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -158,7 +159,8 @@ class Producer(models.Model):
     following = models.ManyToManyField("self", symmetrical=False, related_name="producer_following", blank=True)  # Following system
     created_at = models.DateTimeField(auto_now_add=True)
     reset_code = models.CharField(max_length=6, blank=True, null=True)
-    
+    collaboration_count = models.PositiveIntegerField(default=0)  # Track number of successful collaborations
+
     # Use custom manager
     objects = ProducerManager()
 
@@ -167,7 +169,7 @@ class Producer(models.Model):
 
         if self.password and not self.password.startswith("pbkdf2_sha256$"):
             self.password = make_password(self.password)
-            
+
         # Ensure new producers get IDs starting from 1,000,000
         if not self.pk:
             # Check if we're adding a new record
@@ -180,7 +182,7 @@ class Producer(models.Model):
                     # For SQLite
                     self.id = 1000000
                 # For PostgreSQL, the migration will handle this via sequence
-            
+
         # Delete old profile picture if it exists
         if self.pk:
             old_instance = Producer.objects.get(pk=self.pk)
@@ -188,7 +190,7 @@ class Producer(models.Model):
                 old_instance.profile_picture.delete(save=False)
             if hasattr(old_instance, 'cover_photo') and old_instance.cover_photo and self.cover_photo != old_instance.cover_photo:
                 old_instance.cover_photo.delete(save=False)
-                
+
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -200,13 +202,13 @@ class CollaborationRequest(models.Model):
         ('accepted', 'Accepted'),
         ('rejected', 'Rejected')
     ]
-    
+
     # Update relationship fields to handle both user types
     sender_artist = models.ForeignKey('Artist', on_delete=models.CASCADE, related_name='sent_requests', null=True, blank=True)
     sender_producer = models.ForeignKey('Producer', on_delete=models.CASCADE, related_name='sent_requests', null=True, blank=True)
     receiver_artist = models.ForeignKey('Artist', on_delete=models.CASCADE, related_name='received_requests', null=True, blank=True)
     receiver_producer = models.ForeignKey('Producer', on_delete=models.CASCADE, related_name='received_requests', null=True, blank=True)
-    
+
     message = models.TextField()
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -218,7 +220,7 @@ class CollaborationRequest(models.Model):
     @property
     def sender(self):
         return self.sender_artist or self.sender_producer
-        
+
     @property
     def receiver(self):
         return self.receiver_artist or self.receiver_producer
@@ -236,35 +238,35 @@ class Notification(models.Model):
         ('like', 'Post Like'),
         ('comment', 'Post Comment')
     ]
-    
+
     # Can be linked to either an Artist or Producer
     artist = models.ForeignKey('Artist', on_delete=models.CASCADE, related_name='notifications', null=True, blank=True)
     producer = models.ForeignKey('Producer', on_delete=models.CASCADE, related_name='notifications', null=True, blank=True)
-    
+
     # Sender information - can be either artist or producer
     sender_artist = models.ForeignKey('Artist', on_delete=models.CASCADE, related_name='sent_notifications', null=True, blank=True)
     sender_producer = models.ForeignKey('Producer', on_delete=models.CASCADE, related_name='sent_notifications', null=True, blank=True)
-    
+
     notification_type = models.CharField(max_length=50, choices=NOTIFICATION_TYPES)
     message = models.TextField()
     related_id = models.IntegerField(null=True, blank=True)  # ID of the related object (e.g., collaboration request ID)
     post_id = models.IntegerField(null=True, blank=True)  # ID of the related post
     read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
-    
+
     class Meta:
         ordering = ['-created_at']
-    
+
     @property
     def user(self):
         """Get the user (artist or producer) this notification belongs to"""
         return self.artist or self.producer
-    
+
     @property
     def sender(self):
         """Get the user (artist or producer) who sent this notification"""
         return self.sender_artist or self.sender_producer
-    
+
     def __str__(self):
         user_name = self.user.username if self.user else "Unknown"
         return f"Notification for {user_name}: {self.message[:50]}..."
